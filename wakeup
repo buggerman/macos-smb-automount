@@ -1,0 +1,7 @@
+#!/bin/bash
+# sleepwatcher runs this on wake from sleep.
+# Restart the mount agent so it re-checks reachability.
+# KeepAlive=true in the plist means launchd restarts it immediately.
+#
+# If you changed the Label in the plist, update it here too.
+launchctl stop com.smb.automount
