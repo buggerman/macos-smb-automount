@@ -32,7 +32,18 @@ fi
 
 SETTLE_DELAY=3        # Seconds to wait after an event before acting (avoids flapping)
 MOUNT_COOLDOWN=10     # Minimum seconds between mount attempts (per share)
-declare -A LAST_MOUNT_TIME   # share -> epoch of last successful mount
+
+# Per-share last-mount epoch is stored in LAST_MOUNT_TIME_<sanitized_share>.
+# We avoid `declare -A` because /bin/bash on macOS is 3.2 and lacks associative arrays.
+_share_key() { echo "${1//[^a-zA-Z0-9_]/_}"; }
+
+# Marker files track shares the agent has mounted. If a share is unmounted by
+# the user (mount missing, marker present), we leave it alone until the host
+# becomes unreachable (which clears the marker) or the agent restarts.
+STATE_DIR="$(dirname "$0")/state"
+mkdir -p "$STATE_DIR"
+rm -f "$STATE_DIR"/mounted-* 2>/dev/null   # fresh slate on agent start
+_marker_path() { echo "$STATE_DIR/mounted-$(_share_key "$1")"; }
 
 # ==============================================================================
 # FUNCTIONS
@@ -91,7 +102,10 @@ do_mount() {
         sleep 0.5
         if is_mounted "$share"; then
             log "Mount complete: ${path}"
-            LAST_MOUNT_TIME[$share]=$(date +%s)
+            local key
+            key=$(_share_key "$share")
+            eval "LAST_MOUNT_TIME_${key}=$(date +%s)"
+            touch "$(_marker_path "$share")"
             return 0
         fi
         i=$((i + 1))
@@ -107,6 +121,7 @@ do_unmount() {
     log "Unmounting ${path}..."
     diskutil unmount force "${path}" >/dev/null 2>&1
     log "Unmount complete: ${path} (exit: $?)"
+    rm -f "$(_marker_path "$share")"
 }
 
 handle_event() {
@@ -131,8 +146,17 @@ handle_event() {
         log "  ${share}: mounted=${mounted}"
 
         if [ "$reachable" = true ] && [ "$mounted" = false ]; then
+            if [ -f "$(_marker_path "$share")" ]; then
+                # Marker present but not mounted = user unmounted manually.
+                # Leave it alone until host disconnects (clears marker) or agent restarts.
+                log "  ${share}: user-unmounted, leaving alone"
+                continue
+            fi
             now=$(date +%s)
-            last=${LAST_MOUNT_TIME[$share]:-0}
+            local key varname
+            key=$(_share_key "$share")
+            varname="LAST_MOUNT_TIME_${key}"
+            last=${!varname:-0}
             if [ $((now - last)) -lt $MOUNT_COOLDOWN ]; then
                 log "  ${share}: mount cooldown active, skipping"
             else
@@ -140,6 +164,9 @@ handle_event() {
             fi
         elif [ "$reachable" = false ] && [ "$mounted" = true ]; then
             do_unmount "$share"
+        elif [ "$reachable" = false ]; then
+            # Host gone — clear any stale user-unmount marker so reconnect is fresh.
+            rm -f "$(_marker_path "$share")"
         fi
     done
 }
