@@ -1,6 +1,6 @@
 # macOS SMB Auto-Mount
 
-Automatically mount an SMB share when a network target becomes reachable, and unmount when it disconnects. Silent, no popups, no polling.
+Automatically mount one or more SMB shares when a network target becomes reachable, and unmount them when it disconnects. Silent, no popups, no polling.
 
 This works with any network-driven event — a VPN connecting, a specific IP coming online, a host appearing on the local network. I use it with Tailscale to securely access SMB shares on my home server from anywhere.
 
@@ -8,9 +8,9 @@ This works with any network-driven event — a VPN connecting, a specific IP com
 
 - A launchd agent runs a bash script that watches for reachability changes using `scutil -W -r`
 - `scutil` is kernel-notified on route changes — zero polling, zero network traffic at rest
-- When the target becomes reachable, the script mounts the share via Finder (silent, no dialogs)
-- When the target disconnects, it unmounts via `diskutil unmount force` (works even when server is unreachable)
-- Credentials are pulled from Keychain at runtime — never stored in plain text
+- When the target becomes reachable, the script mounts every configured share via Finder (silent, no dialogs)
+- When the target disconnects, it unmounts each one via `diskutil unmount force` (works even when server is unreachable)
+- Credentials are pulled from Keychain at runtime — never stored in plain text. One Keychain entry covers all shares on the same host
 - sleepwatcher handles wake-from-sleep by restarting the agent, which re-checks reachability immediately
 
 ## Prerequisites
@@ -47,22 +47,31 @@ brew services start sleepwatcher
 
 ### 3. Create the mount script
 
-Copy `mount.sh` to a permanent location:
+Copy `mount.sh` and the example config to a permanent location:
 
 ```bash
 mkdir -p ~/Library/Application\ Support/SMBAutoMount
-cp mount.sh ~/Library/Application\ Support/SMBAutoMount/
+cp mount.sh mount.config.example.sh ~/Library/Application\ Support/SMBAutoMount/
+cp ~/Library/Application\ Support/SMBAutoMount/mount.config.example.sh \
+   ~/Library/Application\ Support/SMBAutoMount/mount.config.sh
 chmod 700 ~/Library/Application\ Support/SMBAutoMount/mount.sh
+chmod 600 ~/Library/Application\ Support/SMBAutoMount/mount.config.sh
 ```
 
-Edit the script and update the variables at the top:
+Edit `mount.config.sh` and fill in your values:
 
 ```bash
-TARGET_IP="YOUR_SERVER_IP"      # IP or hostname to watch for reachability
-SHARE_NAME="YOUR_SHARE_NAME"              # SMB share name
-MOUNT_PATH="/Volumes/YOUR_SHARE_NAME"     # Where it will mount (auto-created by Finder)
-SMB_USER="your_username"        # Must match what you used in Keychain
+TARGET_HOST="YOUR_SERVER_IP_OR_HOSTNAME"  # IP or hostname to watch for reachability
+SMB_USER="your_username"                  # Must match what you used in Keychain
+
+SHARES=(
+    "share_one"
+    "share_two"
+    # add more — each mounts at /Volumes/<name>
+)
 ```
+
+`mount.config.sh` is gitignored so your hostnames, usernames, and share names never get committed. `mount.sh` sources it at startup. All shares listed in `SHARES` are mounted on the same `TARGET_HOST` using the same Keychain credential (one entry, indexed by `SMB_USER` + `TARGET_HOST`). To add a share later, append another line to the array in `mount.config.sh` and restart the agent (`launchctl stop com.smb.automount`).
 
 ### 4. Install the launchd agent
 
@@ -94,6 +103,7 @@ If you changed the launchd label in the plist, update it in `~/.wakeup` too.
 | File | Description |
 |------|-------------|
 | `mount.sh` | Main script — watches reachability, mounts/unmounts |
+| `mount.config.example.sh` | Template config — copy to `mount.config.sh` (gitignored) and fill in |
 | `com.smb.automount.plist` | launchd agent — runs mount.sh at login, keeps it alive |
 | `wakeup` | sleepwatcher script — restarts agent on wake from sleep |
 
