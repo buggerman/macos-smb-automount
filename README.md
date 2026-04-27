@@ -47,13 +47,12 @@ brew services start sleepwatcher
 
 ### 3. Create the mount script
 
-Copy `mount.sh` and the example config to a permanent location:
+Copy `mount.sh` to a permanent location and create your local config from the example:
 
 ```bash
 mkdir -p ~/Library/Application\ Support/SMBAutoMount
-cp mount.sh mount.config.example.sh ~/Library/Application\ Support/SMBAutoMount/
-cp ~/Library/Application\ Support/SMBAutoMount/mount.config.example.sh \
-   ~/Library/Application\ Support/SMBAutoMount/mount.config.sh
+cp mount.sh ~/Library/Application\ Support/SMBAutoMount/
+cp mount.config.example.sh ~/Library/Application\ Support/SMBAutoMount/mount.config.sh
 chmod 700 ~/Library/Application\ Support/SMBAutoMount/mount.sh
 chmod 600 ~/Library/Application\ Support/SMBAutoMount/mount.config.sh
 ```
